@@ -469,14 +469,9 @@ static int add_worktree(const char *path, const char *refname,
 	struct commit *commit = NULL;
 	int is_branch = 0;
 	struct strbuf sb_name = STRBUF_INIT;
-	struct worktree **worktrees, *wt = NULL;
+	struct worktree *wt = NULL;
 	struct ref_store *wt_refs;
 	struct repo_config_values *cfg = repo_config_values(the_repository);
-
-	worktrees = get_worktrees(the_repository);
-	check_candidate_path(path, opts->force, worktrees, "add");
-	free_worktrees(worktrees);
-	worktrees = NULL;
 
 	/* is 'refname' a branch or commit? */
 	if (!opts->detach && !check_branch_ref(the_repository, &symref, refname) &&
@@ -832,6 +827,7 @@ static int add(int ac, const char **av, const char *prefix,
 	const char *lock_reason = NULL;
 	int keep_locked = 0;
 	int used_new_branch_options;
+	struct worktree **worktrees;
 	struct option options[] = {
 		OPT__FORCE(&opts.force,
 			   N_("checkout <branch> even if already checked out in other worktree"),
@@ -889,6 +885,14 @@ static int add(int ac, const char **av, const char *prefix,
 	path = prefix_filename(prefix, av[0]);
 	branch = ac < 2 ? "HEAD" : av[1];
 	used_new_branch_options = new_branch || new_branch_force;
+
+	/*
+	 * Refuse an unusable destination before anything else, in
+	 * particular before a new branch is created for it.
+	 */
+	worktrees = get_worktrees(the_repository);
+	check_candidate_path(path, opts.force, worktrees, "add");
+	free_worktrees(worktrees);
 
 	if (!strcmp(branch, "-"))
 		branch = "@{-1}";
