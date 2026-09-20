@@ -235,6 +235,45 @@ This can also be set up as the default behaviour by using the
 With `repair`, the linking files will be updated if there's an absolute/relative
 mismatch, even if the links are correct.
 
+`--reflink[=(auto|always|never)]`::
+`--no-reflink`::
+	With `add`, populate the new working tree by cloning file
+	contents from the current working tree using the filesystem's
+	copy-on-write mechanism (`FICLONE` on Linux filesystems such
+	as Btrfs and XFS, `clonefile` on APFS), instead of writing
+	them from the object database.  This can make creating a
+	working tree of a large repository considerably faster, and
+	the new working tree shares its disk space with the current
+	one: clones are independent files whose storage is shared
+	until modified, so writing in one working tree never affects
+	another.
++
+Only content that would be byte-identical to a normal checkout is
+ever cloned: entries that are modified in the current working tree,
+or subject to content filters, ident expansion, working-tree
+encodings, or end-of-line conversion, are checked out normally, as
+are symbolic links and submodules.  Untracked and ignored files in
+the current working tree are never copied.  Every cloned file is
+verified against its object id before being trusted.
++
+`--reflink` without a value means `always`, which fails instead of
+falling back: up front when there is no current working tree to clone
+from, when the filesystem does not support cloning, or when the two
+are on filesystems that cannot clone between them, and during the
+checkout when the filesystem refuses to clone a file after all (a
+mount point inside the current working tree, say), in which case the
+new working tree is removed again.  `auto` silently falls back to a
+normal checkout in all of those cases.  With either value, a file
+that merely cannot serve as a source (modified, unreadable, or being
+written to) is checked out normally.  Whether cloning can work is
+decided by trial clones into the location of `<path>`, not guessed
+from filesystem types.  Like
+linkgit:git-status[1], the command may refresh (and write) the
+index of the current working tree first.  `never`, or
+`--no-reflink`, disables cloning.  Defaults to `worktree.reflink` if
+set, otherwise `never`.  With `--no-checkout` or `--orphan` there is
+nothing to clone and `--reflink` has no effect.
+
 `--track`::
 `--no-track`::
 	When creating a new branch, if _<commit-ish>_ is a branch,

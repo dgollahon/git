@@ -70,10 +70,14 @@ struct unpack_trees_options {
 		     quiet,
 		     exiting_early,
 		     dry_run,
-		     skip_cache_tree_update;
+		     skip_cache_tree_update,
+		     /* fail instead of falling back when reflink_donor cannot be cloned from */
+		     reflink_required;
 	enum unpack_trees_reset_type reset;
 	const char *prefix;
 	const char *super_prefix;
+	/* worktree to clone files from while checking out; see reflink-checkout.h */
+	const char *reflink_donor;
 	struct pathspec *pathspec;
 	merge_fn_t fn;
 

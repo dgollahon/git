@@ -18,12 +18,14 @@
 #include "strvec.h"
 #include "branch.h"
 #include "read-cache-ll.h"
+#include "reflink-checkout.h"
 #include "refs.h"
 #include "remote.h"
 #include "run-command.h"
 #include "hook.h"
 #include "sigchain.h"
 #include "submodule.h"
+#include "trace2.h"
 #include "utf8.h"
 #include "worktree.h"
 #include "quote.h"
@@ -124,6 +126,8 @@ struct add_opts {
 	int orphan;
 	int relative_paths;
 	const char *keep_locked;
+	const char *reflink_donor;
+	int reflink_required;
 };
 
 static int show_only;
@@ -131,6 +135,42 @@ static int verbose;
 static int guess_remote;
 static int use_relative_paths;
 static timestamp_t expire;
+
+enum worktree_reflink {
+	WT_REFLINK_UNSET = -1,
+	WT_REFLINK_NEVER = 0,
+	WT_REFLINK_AUTO,
+	WT_REFLINK_ALWAYS,
+};
+static enum worktree_reflink reflink_when = WT_REFLINK_UNSET;
+
+static int parse_reflink_when(const char *arg, enum worktree_reflink *out)
+{
+	if (!arg || !strcmp(arg, "always"))
+		*out = WT_REFLINK_ALWAYS;
+	else if (!strcmp(arg, "auto"))
+		*out = WT_REFLINK_AUTO;
+	else if (!strcmp(arg, "never"))
+		*out = WT_REFLINK_NEVER;
+	else
+		return -1;
+	return 0;
+}
+
+static int reflink_opt_callback(const struct option *opt, const char *arg,
+				int unset)
+{
+	enum worktree_reflink *when = opt->value;
+
+	if (unset) {
+		*when = WT_REFLINK_NEVER;
+		return 0;
+	}
+	if (parse_reflink_when(arg, when))
+		return error(_("option `%s' expects \"always\", \"auto\", or \"never\""),
+			     opt->long_name);
+	return 0;
+}
 
 static int git_worktree_config(const char *var, const char *value,
 			       const struct config_context *ctx, void *cb)
@@ -140,6 +180,21 @@ static int git_worktree_config(const char *var, const char *value,
 		return 0;
 	} else if (!strcmp(var, "worktree.userelativepaths")) {
 		use_relative_paths = git_config_bool(var, value);
+		return 0;
+	} else if (!strcmp(var, "worktree.reflink")) {
+		int b;
+
+		if (!value) {
+			/* "[worktree] reflink" with no value: boolean true */
+			reflink_when = WT_REFLINK_AUTO;
+			return 0;
+		}
+		b = git_parse_maybe_bool(value);
+		if (b >= 0)
+			reflink_when = b ? WT_REFLINK_AUTO : WT_REFLINK_NEVER;
+		else if (parse_reflink_when(value, &reflink_when))
+			return error(_("invalid value for '%s': '%s'"),
+				     var, value);
 		return 0;
 	}
 
@@ -403,6 +458,12 @@ static int checkout_worktree(const struct add_opts *opts,
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
+	if (opts->reflink_donor) {
+		strvec_pushf(&cp.args, "--reflink-donor=%s",
+			     opts->reflink_donor);
+		if (opts->reflink_required)
+			strvec_push(&cp.args, "--reflink-required");
+	}
 	return run_command(&cp);
 }
 
@@ -850,6 +911,11 @@ static int add(int ac, const char **av, const char *prefix,
 			 N_("try to match the new branch name with a remote-tracking branch")),
 		OPT_BOOL(0, "relative-paths", &opts.relative_paths,
 			 N_("use relative paths for worktrees")),
+		OPT_CALLBACK_F(0, "reflink", &reflink_when,
+			       N_("(auto|always|never)"),
+			       N_("clone checkout contents from the current "
+				  "worktree via filesystem copy-on-write"),
+			       PARSE_OPT_OPTARG, reflink_opt_callback),
 		OPT_END()
 	};
 	int ret;
@@ -974,6 +1040,43 @@ static int add(int ac, const char **av, const char *prefix,
 				WORKTREE_ADD_ORPHAN_NO_DASH_B_HINT_TEXT, path);
 		}
 		die(_("invalid reference: %s"), branch);
+	}
+
+	if (reflink_when == WT_REFLINK_UNSET)
+		reflink_when = git_env_bool("GIT_TEST_WORKTREE_REFLINK", 0) ?
+			WT_REFLINK_AUTO : WT_REFLINK_NEVER;
+	if (reflink_when != WT_REFLINK_NEVER && opts.checkout &&
+	    !opts.orphan) {
+		const char *donor = repo_get_work_tree(the_repository);
+		int probe;
+
+		if (!donor) {
+			if (reflink_when == WT_REFLINK_ALWAYS)
+				die(_("reflink is set to 'always' but there is "
+				      "no working tree to clone files from"));
+			trace2_data_string("reflink", the_repository,
+					   "disabled", "no-donor");
+		} else if (!(probe = reflink_prepare_donor(the_repository,
+							    path))) {
+			if (reflink_when == WT_REFLINK_ALWAYS)
+				die(_("reflink is set to 'always' but files "
+				      "cannot be cloned from '%s' to '%s'"),
+				    donor, path);
+			trace2_data_string("reflink", the_repository,
+					   "disabled", "fs-unsupported");
+		} else {
+			/*
+			 * A probe without a verdict (probe < 0) could not
+			 * even create its temporary file, so creating the
+			 * working tree is about to fail with the real
+			 * error; do not hide it behind ours.
+			 */
+			trace2_data_string("reflink", the_repository, "probe",
+					   probe < 0 ? "inconclusive" : "ok");
+			opts.reflink_donor = donor;
+			opts.reflink_required =
+				reflink_when == WT_REFLINK_ALWAYS;
+		}
 	}
 
 	if (!opts.quiet)

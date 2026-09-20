@@ -57,6 +57,15 @@ int finish_delayed_checkout(struct checkout *state, int show_progress);
  */
 void unlink_entry(const struct cache_entry *ce, const char *super_prefix);
 
+/*
+ * Create the leading directories of "path" (whose length is "path_len")
+ * as checkout_entry() does before writing a file there: existing real
+ * directories are kept, anything else in the way is removed when
+ * state->force is set, and a failure to create a directory dies.
+ */
+void create_directories(const char *path, int path_len,
+			const struct checkout *state);
+
 void *read_blob_entry(const struct cache_entry *ce, size_t *size);
 int fstat_checkout_output(int fd, const struct checkout *state, struct stat *st);
 void update_ce_after_write(const struct checkout *state, struct cache_entry *ce,

@@ -471,6 +471,11 @@ dependency breaks or is simply not present in a new environment.
 GIT_TEST_NAME_HASH_VERSION=<int>, when set, causes 'git pack-objects' to
 assume '--name-hash-version=<n>'.
 
+GIT_TEST_WORKTREE_REFLINK=<boolean> makes "git worktree add" behave as
+if --reflink=auto were given whenever no explicit --reflink option or
+worktree.reflink configuration says otherwise, so the whole test suite
+exercises the clone-accelerated path on filesystems that support it.
+
 
 Naming Tests
 ------------
@@ -1259,6 +1264,17 @@ use these, and "test_set_prereq" for how to define your own.
 
    The filesystem we're on supports symbolic links. E.g. a FAT
    filesystem doesn't support these. See 704a3143 for details.
+
+ - REFLINK
+
+   The filesystem we're on can clone a file copy-on-write (FICLONE on
+   Linux, clonefile(2) on macOS), as "git worktree add --reflink"
+   does.
+
+ - REFLINK_PRIMITIVE
+
+   Git was built with a copy-on-write clone primitive, whether or not
+   the filesystem we're on supports it.
 
  - SANITY
 

@@ -480,6 +480,7 @@ libgit_sources = [
   'rebase-interactive.c',
   'rebase.c',
   'ref-filter.c',
+  'reflink-checkout.c',
   'reflog-walk.c',
   'reflog.c',
   'refs.c',
@@ -1353,6 +1354,7 @@ endif
 
 if host_machine.system() == 'linux'
   compat_sources += 'compat/linux/procinfo.c'
+  libgit_c_args += '-DHAVE_FICLONE'
 elif host_machine.system() == 'windows'
   compat_sources += 'compat/win32/trace2_win32_process_info.c'
 elif host_machine.system() == 'darwin'
@@ -1539,6 +1541,10 @@ if compiler.compiles('''
   }
 ''', name: 'monotonic clock')
   libgit_c_args += '-DHAVE_CLOCK_MONOTONIC'
+endif
+
+if compiler.has_header('sys/clonefile.h')
+  libgit_c_args += '-DHAVE_CLONEFILE'
 endif
 
 has_bsd_sysctl = false

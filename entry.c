@@ -16,8 +16,8 @@
 #include "entry.h"
 #include "parallel-checkout.h"
 
-static void create_directories(const char *path, int path_len,
-			       const struct checkout *state)
+void create_directories(const char *path, int path_len,
+			const struct checkout *state)
 {
 	char *buf = xmallocz(path_len);
 	int len = 0;

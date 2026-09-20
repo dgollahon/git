@@ -30,6 +30,7 @@
 #include "promisor-remote.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "reflink-checkout.h"
 #include "setup.h"
 
 /*
@@ -429,6 +430,7 @@ static int check_updates(struct unpack_trees_options *o,
 	int errs = 0;
 	struct progress *progress;
 	struct checkout state = CHECKOUT_INIT;
+	struct reflink_donor_map *reflink_map = NULL;
 	int i, pc_workers, pc_threshold;
 
 	trace_performance_enter();
@@ -482,6 +484,9 @@ static int check_updates(struct unpack_trees_options *o,
 
 	get_parallel_checkout_configs(&pc_workers, &pc_threshold);
 
+	reflink_map = reflink_donor_map_load(the_repository, o->reflink_donor,
+					     o->reflink_required);
+
 	enable_delayed_checkout(&state);
 	if (pc_workers > 1)
 		init_parallel_checkout();
@@ -495,6 +500,17 @@ static int check_updates(struct unpack_trees_options *o,
 				BUG("both update and delete flags are set on %s",
 				    ce->name);
 			ce->ce_flags &= ~CE_UPDATE;
+			if (reflink_map) {
+				int cloned = reflink_try_checkout_entry(&state, ce,
+									reflink_map);
+
+				if (cloned > 0) {
+					display_progress(progress, ++cnt);
+					continue;
+				}
+				if (cloned < 0)
+					errs = 1;
+			}
 			errs |= checkout_entry(ce, &state, NULL, NULL);
 
 			if (last_pc_queue_size == pc_queue_size())
@@ -505,6 +521,7 @@ static int check_updates(struct unpack_trees_options *o,
 		errs |= run_parallel_checkout(&state, pc_workers, pc_threshold,
 					      progress, &cnt);
 	stop_progress(&progress);
+	reflink_donor_map_free(reflink_map);
 	errs |= finish_delayed_checkout(&state, o->verbose_update);
 	git_attr_set_direction(GIT_ATTR_CHECKIN);
 

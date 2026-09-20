@@ -18,3 +18,15 @@
 Note that setting `worktree.useRelativePaths` to "`true`" implies enabling the
 `extensions.relativeWorktrees` config (see linkgit:git-config[1]),
 thus making it incompatible with older versions of Git.
+
+`worktree.reflink`::
+	When set to `auto`, `git worktree add` will try to populate the
+	new working tree by cloning file contents from the current
+	working tree using the filesystem's copy-on-write mechanism
+	(reflinks), falling back to a normal checkout on filesystems
+	that do not support it.  When set to `always`, the command
+	fails instead when it cannot clone from the current working
+	tree into the destination.  `true` and `false` are
+	accepted as synonyms for `auto` and `never`.  Defaults to
+	`never`.  See the `--reflink` option in linkgit:git-worktree[1]
+	for details.
