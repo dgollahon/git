@@ -24,6 +24,12 @@ test_expect_success '"add" an existing empty worktree' '
 	git worktree add --detach existing_empty main
 '
 
+test_expect_success '"add -b" to an unusable destination creates no branch' '
+	mkdir -p occupied/subtree &&
+	test_must_fail git worktree add -b never-created occupied main &&
+	test_must_fail git rev-parse --verify refs/heads/never-created
+'
+
 test_expect_success '"add" using shorthand - fails when no previous branch' '
 	test_must_fail git worktree add existing_short -
 '
