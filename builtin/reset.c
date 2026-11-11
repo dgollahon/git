@@ -59,7 +59,8 @@ static inline int is_merge(void)
 	return !access(git_path_merge_head(the_repository), F_OK);
 }
 
-static int reset_index(const char *ref, const struct object_id *oid, int reset_type, int quiet)
+static int reset_index(const char *ref, const struct object_id *oid,
+		       int reset_type, int quiet, const char *reflink_donor)
 {
 	int i, nr = 0;
 	struct tree_desc desc[2];
@@ -69,6 +70,7 @@ static int reset_index(const char *ref, const struct object_id *oid, int reset_t
 
 	memset(&opts, 0, sizeof(opts));
 	opts.head_idx = 1;
+	opts.reflink_donor = reflink_donor;
 	opts.src_index = the_repository->index;
 	opts.dst_index = the_repository->index;
 	opts.fn = oneway_merge;
@@ -343,6 +345,7 @@ int cmd_reset(int argc,
 	int patch_mode = 0, pathspec_file_nul = 0, unborn;
 	const char *rev;
 	char *pathspec_from_file = NULL;
+	const char *reflink_donor = NULL;
 	struct object_id oid;
 	struct pathspec pathspec;
 	int intent_to_add = 0;
@@ -379,6 +382,10 @@ int cmd_reset(int argc,
 				N_("record only the fact that removed paths will be added later")),
 		OPT_PATHSPEC_FROM_FILE(&pathspec_from_file),
 		OPT_PATHSPEC_FILE_NUL(&pathspec_file_nul),
+		/* internal, for "git worktree add"; see reflink-checkout.h */
+		OPT_STRING_F(0, "reflink-donor", &reflink_donor, N_("path"),
+			     N_("worktree to clone files from"),
+			     PARSE_OPT_HIDDEN),
 		OPT_END()
 	};
 
@@ -519,9 +526,11 @@ int cmd_reset(int argc,
 			if (ref && !starts_with(ref, "refs/"))
 				FREE_AND_NULL(ref);
 
-			err = reset_index(ref, &oid, reset_type, quiet);
+			err = reset_index(ref, &oid, reset_type, quiet,
+					  reflink_donor);
 			if (reset_type == KEEP && !err)
-				err = reset_index(ref, &oid, MIXED, quiet);
+				err = reset_index(ref, &oid, MIXED, quiet,
+						  reflink_donor);
 			if (err)
 				die(_("Could not reset index file to revision '%s'."), rev);
 			free(ref);

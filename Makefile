@@ -1280,6 +1280,7 @@ LIB_OBJS += read-cache.o
 LIB_OBJS += rebase-interactive.o
 LIB_OBJS += rebase.o
 LIB_OBJS += ref-filter.o
+LIB_OBJS += reflink-checkout.o
 LIB_OBJS += reflog-walk.o
 LIB_OBJS += reflog.o
 LIB_OBJS += refs.o
