@@ -58,6 +58,7 @@ ifeq ($(uname_S),Linux)
 	HAVE_CLOCK_MONOTONIC = YesPlease
 	HAVE_SYNC_FILE_RANGE = YesPlease
 	HAVE_GETDELIM = YesPlease
+	HAVE_FICLONE = YesPlease
 	FREAD_READS_DIRECTORIES = UnfortunatelyYes
 	HAVE_SYSINFO = YesPlease
 	PROCFS_EXECUTABLE_PATH = /proc/self/exe
@@ -156,6 +157,9 @@ ifeq ($(uname_S),Darwin)
 	BASIC_CFLAGS += -DPRECOMPOSE_UNICODE
 	BASIC_CFLAGS += -DPROTECT_HFS_DEFAULT=1
 	HAVE_BSD_SYSCTL = YesPlease
+        ifeq ($(shell test "$(DARWIN_MAJOR_VERSION)" -ge 16 && echo 1),1)
+		HAVE_CLONEFILE = YesPlease
+        endif
 	FREAD_READS_DIRECTORIES = UnfortunatelyYes
 	HAVE_NS_GET_EXECUTABLE_PATH = YesPlease
 	CSPRNG_METHOD = arc4random

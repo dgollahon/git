@@ -133,6 +133,7 @@ integration_tests = [
   't0092-diagnose.sh',
   't0093-verify-cache-df-gap.sh',
   't0095-bloom.sh',
+  't0096-reflink.sh',
   't0100-previous.sh',
   't0101-at-syntax.sh',
   't0200-gettext-basic.sh',

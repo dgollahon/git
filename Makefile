@@ -347,6 +347,12 @@ include shared.mak
 #
 # Define HAVE_GETDELIM if your system has the getdelim() function.
 #
+# Define HAVE_FICLONE if your platform supports the FICLONE ioctl to clone
+# a file's contents copy-on-write (Linux).
+#
+# Define HAVE_CLONEFILE if your platform has the clonefile(2) system call
+# (macOS).
+#
 # Define FILENO_IS_A_MACRO if fileno() is a macro, not a real function.
 #
 # Define NEED_ACCESS_ROOT_HANDLER if access() under root may success for X_OK
@@ -857,6 +863,7 @@ TEST_BUILTINS_OBJS += test-read-cache.o
 TEST_BUILTINS_OBJS += test-read-graph.o
 TEST_BUILTINS_OBJS += test-read-midx.o
 TEST_BUILTINS_OBJS += test-ref-store.o
+TEST_BUILTINS_OBJS += test-reflink.o
 TEST_BUILTINS_OBJS += test-reftable.o
 TEST_BUILTINS_OBJS += test-regex.o
 TEST_BUILTINS_OBJS += test-rot13-filter.o
@@ -2321,6 +2328,14 @@ endif
 
 ifdef HAVE_GETDELIM
 	BASIC_CFLAGS += -DHAVE_GETDELIM
+endif
+
+ifdef HAVE_FICLONE
+	BASIC_CFLAGS += -DHAVE_FICLONE
+endif
+
+ifdef HAVE_CLONEFILE
+	BASIC_CFLAGS += -DHAVE_CLONEFILE
 endif
 
 ifneq ($(findstring arc4random,$(CSPRNG_METHOD)),)

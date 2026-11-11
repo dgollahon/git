@@ -1260,6 +1260,16 @@ use these, and "test_set_prereq" for how to define your own.
    The filesystem we're on supports symbolic links. E.g. a FAT
    filesystem doesn't support these. See 704a3143 for details.
 
+ - REFLINK
+
+   The filesystem we're on can clone a file copy-on-write (FICLONE on
+   Linux, clonefile(2) on macOS).
+
+ - REFLINK_PRIMITIVE
+
+   Git was built with a copy-on-write clone primitive, whether or not
+   the filesystem we're on supports it.
+
  - SANITY
 
    Test is not run by root user, and an attempt to write to an
