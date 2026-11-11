@@ -11,10 +11,13 @@
  * re-hashed before it is used.
  */
 #include "git-compat-util.h"
+#include "abspath.h"
 #include "convert.h"
 #include "copy.h"
 #include "entry.h"
+#include "environment.h"
 #include "hash.h"
+#include "lockfile.h"
 #include "object-file.h"
 #include "oidmap.h"
 #include "read-cache-ll.h"
@@ -22,8 +25,16 @@
 #include "repository.h"
 #include "statinfo.h"
 #include "strbuf.h"
+#include "tempfile.h"
 #include "trace2.h"
 #include "worktree.h"
+
+/*
+ * How many donor files to try cloning before giving up on getting a
+ * verdict from them: enough to get past a few odd files (unreadable,
+ * being written to) without walking a large index.
+ */
+#define REFLINK_PROBE_SAMPLES 8
 
 /*
  * How many clone attempts may fail in a row, none having succeeded
@@ -120,6 +131,185 @@ static int index_file_usable(const char *path, const struct git_hash_algo *algo)
 	     ntohl(hdr.hdr_version) <= INDEX_FORMAT_UB;
 	close(fd);
 	return ok;
+}
+
+/*
+ * Does this errno from reflink_file() say that the filesystem cannot
+ * clone at all, as opposed to something being wrong with one file?
+ */
+static int errno_means_unsupported(int err)
+{
+	return err == EOPNOTSUPP || err == ENOTSUP || err == ENOTTY ||
+	       err == EXDEV || err == ENOSYS;
+}
+
+/*
+ * Clone "src" to "dst", which must not exist, and remove the clone
+ * again.  Returns 1 on success, 0 if errno says the filesystem cannot
+ * clone, and -1 if the failure says nothing about clone support (an
+ * unreadable "src", say).  "own_source" says that "src" is a temporary
+ * of ours next to "dst", in which case EINVAL cannot be about a
+ * mismatch between the two files and is a verdict as well.
+ */
+static int probe_clone(const char *dst, const char *src, int own_source)
+{
+	int ret;
+
+	if (!reflink_file(dst, src, 0600))
+		ret = 1;
+	else if (errno_means_unsupported(errno) ||
+		 (own_source && errno == EINVAL))
+		ret = 0;
+	else
+		ret = -1;
+	unlink(dst);
+	return ret;
+}
+
+/*
+ * The nearest existing ancestor of "path", or "path" itself.  That is
+ * where mkdir() will grow the new working tree from, hence on the same
+ * filesystem as it.  The caller frees the result.
+ */
+static char *nearest_existing_dir(const char *path)
+{
+	char *dir = xstrdup(path);
+
+	while (!is_directory(dir)) {
+		char *copy = xstrdup(dir);
+		char *parent = xstrdup(dirname(copy));
+
+		free(copy);
+		if (!strcmp(parent, dir)) {
+			/* nothing above exists; let mkdir() complain later */
+			free(parent);
+			break;
+		}
+		free(dir);
+		dir = parent;
+	}
+	return dir;
+}
+
+/*
+ * Bring the donor's index up to date with its working tree the way
+ * "git status" does: opportunistically, skipping it when another
+ * process holds the index lock or when GIT_OPTIONAL_LOCKS says not to
+ * take one, and writing the index back only when that is worthwhile.
+ * Without this, a donor whose index carries stale
+ * or no stat data (after "git read-tree", say) would contribute nothing
+ * until its owner's next "git status".
+ *
+ * refresh_index() looks files up relative to the current directory,
+ * and "git worktree add" only guarantees to be at the donor's top
+ * level when it was started inside the donor (RUN_SETUP moves it
+ * there); with GIT_DIR/GIT_WORK_TREE pointing elsewhere we may be in
+ * an unrelated directory, and then we leave the index alone.
+ */
+static void refresh_donor_index(struct repository *donor, const char *root)
+{
+	struct lock_file lock = LOCK_INIT;
+	struct strbuf cwd = STRBUF_INIT;
+	int at_root;
+
+	at_root = !strbuf_getcwd(&cwd) && !strcmp(cwd.buf, root);
+	strbuf_release(&cwd);
+	if (!at_root) {
+		trace2_data_string("reflink", donor, "donor/refresh",
+				   "skipped-cwd");
+		return;
+	}
+	if (!use_optional_locks()) {
+		trace2_data_string("reflink", donor, "donor/refresh",
+				   "skipped-optional-locks");
+		return;
+	}
+	if (repo_hold_locked_index(donor, &lock, 0) < 0) {
+		trace2_data_string("reflink", donor, "donor/refresh",
+				   "skipped-locked");
+		return;
+	}
+	repo_read_index(donor);
+	refresh_index(donor->index, REFRESH_QUIET | REFRESH_UNMERGED,
+		      NULL, NULL, NULL);
+	repo_update_index_if_able(donor, &lock);
+}
+
+int reflink_prepare_donor(struct repository *donor, const char *path)
+{
+	const char *root = repo_get_work_tree(donor);
+	struct strbuf buf = STRBUF_INIT;
+	struct tempfile *tmp;
+	struct index_state *istate;
+	char *dir, *dst;
+	int ret = -1, sampled = -1, tried = 0;
+	unsigned int i;
+
+	if (!root)
+		BUG("reflink_prepare_donor() needs a donor with a working tree");
+
+	/*
+	 * One temporary file of ours where the new working tree will be
+	 * created (or in the nearest existing ancestor, which is on the
+	 * same filesystem): it is the source of the first probe clone,
+	 * and its unique name, with a suffix, is where every probe clone
+	 * goes.  The tempfile machinery removes it should we die; a
+	 * clone exists only between reflink_file() and the unlink() that
+	 * follows it.
+	 */
+	dir = nearest_existing_dir(path);
+	strbuf_addf(&buf, "%s/.git-reflink-probe-XXXXXX", dir);
+	free(dir);
+	tmp = mks_tempfile_sm(buf.buf, 0, 0600);
+	if (!tmp) {
+		strbuf_release(&buf);
+		return -1;
+	}
+	dst = xstrfmt("%s.clone", get_tempfile_path(tmp));
+
+	/*
+	 * First the cheap question: does the destination filesystem
+	 * clone at all?  A "no" here is final and spares the donor any
+	 * work, which matters on filesystems without clone support,
+	 * i.e. for most "git worktree add" invocations.
+	 */
+	if (write_in_full(get_tempfile_fd(tmp), "x", 1) == 1 &&
+	    !close_tempfile_gently(tmp))
+		ret = probe_clone(dst, get_tempfile_path(tmp), 1);
+	if (!ret || !index_file_usable(donor->index_file, donor->hash_algo))
+		goto out;
+
+	refresh_donor_index(donor, root);
+
+	/*
+	 * Then the real one: clone an actual donor file, so that a donor
+	 * and a destination that cannot clone between each other
+	 * (different filesystems, or the same one behind two mounts) are
+	 * answered by the very system call the checkout is going to
+	 * make.  A donor with nothing to sample keeps the answer above.
+	 */
+	repo_read_index(donor);
+	istate = donor->index;
+	for (i = 0;
+	     sampled < 0 && tried < REFLINK_PROBE_SAMPLES && i < istate->cache_nr;
+	     i++) {
+		const struct cache_entry *ce = istate->cache[i];
+		struct stat st;
+
+		if (!donor_entry_eligible(ce) ||
+		    !donor_file_clean(ce, root, &buf, &st) || !st.st_size)
+			continue;
+		tried++;
+		sampled = probe_clone(dst, buf.buf, 0);
+	}
+	if (sampled >= 0)
+		ret = sampled;
+
+out:
+	delete_tempfile(&tmp);
+	free(dst);
+	strbuf_release(&buf);
+	return ret;
 }
 
 static const struct cache_entry *donor_lookup(struct reflink_donor_map *m,

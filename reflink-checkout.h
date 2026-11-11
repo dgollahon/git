@@ -15,6 +15,20 @@ struct repository;
  */
 
 /*
+ * Get "donor" ready to serve as the clone source for a new working
+ * tree at "path" (which need not exist yet), and decide whether that
+ * can work at all: refresh the donor's index opportunistically, the
+ * way "git status" does, then clone a temporary file and one file of
+ * the donor into the nearest existing ancestor of "path" and remove
+ * them again.  Returns 1 if cloning worked, 0 if the filesystem(s)
+ * cannot clone between the two, and -1 if no verdict could be reached
+ * because not even a temporary file could be created there (in which
+ * case creating the working tree is bound to fail with a better error
+ * than ours).
+ */
+int reflink_prepare_donor(struct repository *donor, const char *path);
+
+/*
  * A map from blob object id to the donor's index entry for a file
  * whose content is supposed to be that blob.  Opaque.
  */

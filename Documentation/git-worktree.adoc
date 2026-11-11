@@ -105,6 +105,19 @@ passed to the command. In the event the repository has a remote and
 `--guess-remote` is used, but no remote or local branches exist, then the
 command fails with a warning reminding the user to fetch from their remote
 first (or override by using `-f`/`--force`).
++
+On filesystems that can clone files copy-on-write (`FICLONE` on Linux,
+e.g. Btrfs and XFS; `clonefile` on APFS), files that are unmodified in
+the current worktree are cloned from it instead of being written out
+from the object database.  This makes no difference to the result, as
+only files whose contents would be identical to a normal checkout are
+cloned (not those that are modified in the current worktree, nor those
+that are subject to content filters or end-of-line conversion), but it
+is faster and lets the two worktrees share disk space until either
+copy is modified.  Untracked and ignored files are never copied.  Like
+linkgit:git-status[1], the command may refresh the index of the
+current worktree to do this.  See `worktree.reflink` in
+linkgit:git-config[1] to turn it off.
 
 `list`::
 

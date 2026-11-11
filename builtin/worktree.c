@@ -18,12 +18,14 @@
 #include "strvec.h"
 #include "branch.h"
 #include "read-cache-ll.h"
+#include "reflink-checkout.h"
 #include "refs.h"
 #include "remote.h"
 #include "run-command.h"
 #include "hook.h"
 #include "sigchain.h"
 #include "submodule.h"
+#include "trace2.h"
 #include "utf8.h"
 #include "worktree.h"
 #include "quote.h"
@@ -124,6 +126,7 @@ struct add_opts {
 	int orphan;
 	int relative_paths;
 	const char *keep_locked;
+	const char *reflink_donor;
 };
 
 static int show_only;
@@ -131,6 +134,8 @@ static int verbose;
 static int guess_remote;
 static int use_relative_paths;
 static timestamp_t expire;
+
+static int use_reflink = 1;
 
 static int git_worktree_config(const char *var, const char *value,
 			       const struct config_context *ctx, void *cb)
@@ -140,6 +145,9 @@ static int git_worktree_config(const char *var, const char *value,
 		return 0;
 	} else if (!strcmp(var, "worktree.userelativepaths")) {
 		use_relative_paths = git_config_bool(var, value);
+		return 0;
+	} else if (!strcmp(var, "worktree.reflink")) {
+		use_reflink = git_config_bool(var, value);
 		return 0;
 	}
 
@@ -403,6 +411,9 @@ static int checkout_worktree(const struct add_opts *opts,
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
+	if (opts->reflink_donor)
+		strvec_pushf(&cp.args, "--reflink-donor=%s",
+			     opts->reflink_donor);
 	return run_command(&cp);
 }
 
@@ -974,6 +985,25 @@ static int add(int ac, const char **av, const char *prefix,
 				WORKTREE_ADD_ORPHAN_NO_DASH_B_HINT_TEXT, path);
 		}
 		die(_("invalid reference: %s"), branch);
+	}
+
+	if (use_reflink && opts.checkout && !opts.orphan) {
+		const char *donor = repo_get_work_tree(the_repository);
+		int probe = 0;
+
+		if (donor)
+			probe = reflink_prepare_donor(the_repository, path);
+		/*
+		 * A probe without a verdict (probe < 0) could not even
+		 * create its temporary file, so creating the working tree
+		 * is about to fail with the real error; do not hide it.
+		 */
+		trace2_data_string("reflink", the_repository, "probe",
+				   !donor ? "no-donor" :
+				   !probe ? "unsupported" :
+				   probe < 0 ? "inconclusive" : "ok");
+		if (probe)
+			opts.reflink_donor = donor;
 	}
 
 	if (!opts.quiet)

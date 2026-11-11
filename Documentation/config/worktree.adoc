@@ -18,3 +18,9 @@
 Note that setting `worktree.useRelativePaths` to "`true`" implies enabling the
 `extensions.relativeWorktrees` config (see linkgit:git-config[1]),
 thus making it incompatible with older versions of Git.
+
+`worktree.reflink`::
+	If set to `false`, `git worktree add` always writes the files of
+	the new worktree out from the object database, instead of
+	cloning unmodified files from the current worktree on
+	filesystems that support copy-on-write.  Defaults to `true`.
